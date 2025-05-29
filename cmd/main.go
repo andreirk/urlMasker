@@ -4,22 +4,60 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	s "strings"
 )
 
+func hasPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+func splitBySpace(s string) []string {
+	result := make([]string, 0)
+
+	str := []byte(s)
+	for i := 0; i < len(str); i++ {
+		if str[i] == ' ' {
+			result = append(result, string(str[:i]))
+			str = str[i+1:]
+		}
+	}
+	result = append(result, string(str))
+	return result
+}
+
+// repeat returns a string that is repeated n times
+func repeat(s rune, n int) string {
+	result := make([]byte, n)
+	for i := 0; i < n; i++ {
+		result[i] = byte(s)
+	}
+	return string(result)
+}
+
+func join(result []string) string {
+	resultStr := make([]byte, 0)
+	for i, v := range result {
+		resultStr = append(resultStr, []byte(v)...)
+		if i < len(result)-1 {
+			resultStr = append(resultStr, ' ')
+		}
+	}
+	return string(resultStr)
+}
+
 func mask(str string) string {
-	result := s.Split(str, " ")
+	result := splitBySpace(str)
+
+	fmt.Println(result)
 
 	for i, v := range result {
-		if s.HasPrefix(v, "http://") {
-			result[i] = fmt.Sprintf("http://%s", s.Repeat("*", len(v)-7))
-		}
-		if s.HasPrefix(v, "https://") {
-			result[i] = fmt.Sprintf("https://%s", s.Repeat("*", len(v)-8))
+		if hasPrefix(v, "http://") {
+			length := len(result[i]) - 7
+			fmt.Println(result[i], length)
+			result[i] = fmt.Sprintf("http://%s", repeat('*', length))
 		}
 	}
 
-	return s.Join(result, " ")
+	return join(result)
 }
 
 func main() {
