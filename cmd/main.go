@@ -47,12 +47,9 @@ func join(result []string) string {
 func mask(str string) string {
 	result := splitBySpace(str)
 
-	fmt.Println(result)
-
 	for i, v := range result {
 		if hasPrefix(v, "http://") {
 			length := len(result[i]) - 7
-			fmt.Println(result[i], length)
 			result[i] = fmt.Sprintf("http://%s", repeat('*', length))
 		}
 	}
