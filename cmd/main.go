@@ -6,55 +6,33 @@ import (
 	"os"
 )
 
-func hasPrefix(s, prefix string) bool {
-	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
-}
-
-func splitBySpace(s string) []string {
-	result := make([]string, 0)
-
-	str := []byte(s)
-	for i := 0; i < len(str); i++ {
+func mask(str string) string {
+	var result []byte
+	i := 0
+	for i < len(str) {
+		// Пропускаем пробелы
 		if str[i] == ' ' {
-			result = append(result, string(str[:i]))
-			str = str[i+1:]
+			result = append(result, ' ')
+			i++
+			continue
 		}
-	}
-	result = append(result, string(str))
-	return result
-}
+		// Начало слова
+		start := i
+		for i < len(str) && str[i] != ' ' {
+			i++
+		}
+		word := str[start:i]
 
-// repeat returns a string that is repeated n times
-func repeat(s rune, n int) string {
-	result := make([]byte, n)
-	for i := 0; i < n; i++ {
-		result[i] = byte(s)
+		if len(word) >= 7 && string(word[:7]) == "http://" {
+			result = append(result, []byte("http://")...)
+			for j := 7; j < len(word); j++ {
+				result = append(result, '*')
+			}
+		} else {
+			result = append(result, word...)
+		}
 	}
 	return string(result)
-}
-
-func join(result []string) string {
-	resultStr := make([]byte, 0)
-	for i, v := range result {
-		resultStr = append(resultStr, []byte(v)...)
-		if i < len(result)-1 {
-			resultStr = append(resultStr, ' ')
-		}
-	}
-	return string(resultStr)
-}
-
-func mask(str string) string {
-	result := splitBySpace(str)
-
-	for i, v := range result {
-		if hasPrefix(v, "http://") {
-			length := len(result[i]) - 7
-			result[i] = fmt.Sprintf("http://%s", repeat('*', length))
-		}
-	}
-
-	return join(result)
 }
 
 func main() {

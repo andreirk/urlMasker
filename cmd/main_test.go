@@ -12,6 +12,7 @@ func TestMask(t *testing.T) {
 		{"http://example.com", "http://***********"},
 		{"visit http://test.com now", "visit http://******** now"},
 		{"no links here", "no links here"},
+		{"here are two links http://a and http://b", "here are two links http://* and http://*"},
 	}
 
 	for _, tt := range tests {
