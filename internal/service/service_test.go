@@ -1,4 +1,4 @@
-package app
+package service
 
 import (
 	"errors"
@@ -77,19 +77,20 @@ func TestService_Run_PresenterError(t *testing.T) {
 func TestService_mask(t *testing.T) {
 	svc := NewService(nil, nil)
 	tests := []struct {
+		name     string
 		input    string
 		expected string
 	}{
-		{"http://example.com", "http://***********"},
-		{"visit http://test.com now", "visit http://******** now"},
-		{"no links here", "no links here"},
-		{"https://secure.com", "http://**********"},
-		{"http and https http://a https://b", "http and https http://* http://*"},
-		{"", ""},
-		{"   ", "   "},
-		{"http://", "http://"},
-		{"https://", "http://"},
-		{"http://a http://b", "http://* http://*"},
+		{"Test 1", "http://example.com", "http://***********"},
+		{"Test 2", "visit http://test.com now", "visit http://******** now"},
+		{"Test 3", "no links here", "no links here"},
+		{"Test 4", "https://secure.com", "http://**********"},
+		{"Test 5", "http and https http://a https://b", "http and https http://* http://*"},
+		{"Test 6", "", ""},
+		{"Test 7", "   ", "   "},
+		{"Test 8", "http://", "http://"},
+		{"Test 9", "https://", "http://"},
+		{"Test 10", "http://a http://b", "http://* http://*"},
 	}
 
 	for _, tt := range tests {

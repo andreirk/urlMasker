@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"urlMasker/internal/app"
+	srv "urlMasker/internal/service"
 )
 
 func main() {
@@ -19,9 +19,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	producer := app.NewFileProducer(inputPath)
-	presenter := app.NewFilePresenter(outputPath)
-	service := app.NewService(producer, presenter)
+	producer := srv.NewFileProducer(inputPath)
+	presenter := srv.NewFilePresenter(outputPath)
+	service := srv.NewService(producer, presenter)
 
 	if err := service.Run(); err != nil {
 		fmt.Printf("Ошибка: %v\n", err)
