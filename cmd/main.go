@@ -4,47 +4,29 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	srv "urlMasker/internal/service"
 )
 
-func mask(str string) string {
-	var result []byte
-	i := 0
-	for i < len(str) {
-		// Пропускаем пробелы
-		if str[i] == ' ' {
-			result = append(result, ' ')
-			i++
-			continue
-		}
-		// Начало слова
-		start := i
-		for i < len(str) && str[i] != ' ' {
-			i++
-		}
-		word := str[start:i]
-
-		if len(word) >= 7 && string(word[:7]) == "http://" {
-			result = append(result, []byte("http://")...)
-			for j := 7; j < len(word); j++ {
-				result = append(result, '*')
-			}
-		} else {
-			result = append(result, word...)
-		}
-	}
-	return string(result)
-}
-
 func main() {
-	var input string
-
-	flag.StringVar(&input, "input", "", "input string")
+	var inputPath, outputPath string
+	flag.StringVar(&inputPath, "input", "", "путь к входному файлу")
+	flag.StringVar(&outputPath, "output", "output.txt", "путь к выходному файлу (по умолчанию output.txt)")
 	flag.Parse()
 
-	if input == "" {
-		fmt.Println("input is required")
+	if inputPath == "" {
+		fmt.Println("Необходимо указать путь к входному файлу через --input")
 		os.Exit(1)
 	}
 
-	fmt.Println(mask(input))
+	producer := srv.NewFileProducer(inputPath)
+	presenter := srv.NewFilePresenter(outputPath)
+	service := srv.NewService(producer, presenter)
+
+	if err := service.Run(); err != nil {
+		fmt.Printf("Ошибка: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Обработка завершена. Результат записан в:", outputPath)
 }
