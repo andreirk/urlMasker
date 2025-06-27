@@ -61,22 +61,59 @@ func (s *Service) RunWithSemaphore() error {
 	if err != nil {
 		return fmt.Errorf("producer error: %w", err)
 	}
-	var masked = make([]string, len(data))
-	var wg sync.WaitGroup
+
+	type task struct {
+		idx  int
+		text string
+	}
+	type result struct {
+		idx  int
+		text string
+	}
+
+	inCh := make(chan task)
+	outCh := make(chan result)
 	semaphore := utils.NewSemaphore(numOfGorutines)
 
-	for i, line := range data {
-		wg.Add(1)
-		semaphore.Acquire()
-		go func(idx int, l string) {
-			defer wg.Done()
-			defer semaphore.Release()
-			fmt.Printf("Launched worker %d\n", idx)
-			masked[idx] = s.mask(l)
-		}(i, line)
+	// Fan-in
+	results := make([]string, len(data))
+	var faninWg sync.WaitGroup
+	faninWg.Add(1)
+	go func() {
+		defer faninWg.Done()
+		for res := range outCh {
+			results[res.idx] = res.text
+		}
+	}()
+
+	// Workers
+	var workerWg sync.WaitGroup
+	for i := 0; i < numOfGorutines; i++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for t := range inCh {
+				semaphore.Acquire()
+				masked := s.mask(t.text)
+				outCh <- result{t.idx, masked}
+				semaphore.Release()
+			}
+		}()
 	}
-	wg.Wait()
-	if err := s.pres.Present(masked); err != nil {
+
+	// Producer: send tasks
+	go func() {
+		for idx, line := range data {
+			inCh <- task{idx, line}
+		}
+		close(inCh)
+	}()
+
+	workerWg.Wait()
+	close(outCh)
+	faninWg.Wait()
+
+	if err := s.pres.Present(results); err != nil {
 		return fmt.Errorf("presenter error: %w", err)
 	}
 	return nil
@@ -87,18 +124,58 @@ func (s *Service) RunWithWorkerPool() error {
 	if err != nil {
 		return fmt.Errorf("producer error: %w", err)
 	}
-	var masked = make([]string, len(data))
+
+	type task struct {
+		idx  int
+		text string
+	}
+	type result struct {
+		idx  int
+		text string
+	}
+
+	inCh := make(chan task)
+	outCh := make(chan result)
 	pool := utils.NewWorkerPool(numOfGorutines)
 	pool.Run()
-	for i, line := range data {
-		idx, l := i, line
+
+	// Fan-in
+	results := make([]string, len(data))
+	var faninWg sync.WaitGroup
+	faninWg.Add(1)
+	go func() {
+		defer faninWg.Done()
+		for res := range outCh {
+			results[res.idx] = res.text
+		}
+	}()
+
+	// Workers
+	var workerWg sync.WaitGroup
+	for i := 0; i < numOfGorutines; i++ {
+		workerWg.Add(1)
 		pool.AddTask(func() {
-			fmt.Printf("Launched worker %d\n", idx)
-			masked[idx] = s.mask(l)
+			defer workerWg.Done()
+			for t := range inCh {
+				masked := s.mask(t.text)
+				outCh <- result{t.idx, masked}
+			}
 		})
 	}
-	pool.Wait()
-	if err := s.pres.Present(masked); err != nil {
+
+	// Producer: sent tasks
+	go func() {
+		for idx, line := range data {
+			inCh <- task{idx, line}
+		}
+		close(inCh)
+	}()
+
+	workerWg.Wait()
+	close(outCh)
+	faninWg.Wait()
+
+	if err := s.pres.Present(results); err != nil {
 		return fmt.Errorf("presenter error: %w", err)
 	}
 	return nil
