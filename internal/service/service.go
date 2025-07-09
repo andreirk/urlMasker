@@ -1,7 +1,9 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"urlMasker/internal/utils"
 )
@@ -17,12 +19,13 @@ type Presenter interface {
 }
 
 type Service struct {
-	prod Producer
-	pres Presenter
+	prod   Producer
+	pres   Presenter
+	logger *slog.Logger
 }
 
-func NewService(prod Producer, pres Presenter) *Service {
-	return &Service{prod: prod, pres: pres}
+func NewService(prod Producer, pres Presenter, logger *slog.Logger) *Service {
+	return &Service{prod: prod, pres: pres, logger: logger}
 }
 
 func (s *Service) mask(str string) string {
@@ -56,9 +59,12 @@ func (s *Service) mask(str string) string {
 	return string(result)
 }
 
-func (s *Service) RunWithSemaphore() error {
+func (s *Service) RunWithSemaphore(ctx context.Context) error {
+	s.logger.Debug("Service started (semaphore mode)")
+
 	data, err := s.prod.Produce()
 	if err != nil {
+		s.logger.Error("Producer error", slog.String("error", err.Error()))
 		return fmt.Errorf("producer error: %w", err)
 	}
 
@@ -75,53 +81,88 @@ func (s *Service) RunWithSemaphore() error {
 	outCh := make(chan result)
 	semaphore := utils.NewSemaphore(numOfGorutines)
 
-	// Fan-in
 	results := make([]string, len(data))
 	var faninWg sync.WaitGroup
 	faninWg.Add(1)
 	go func() {
+		s.logger.Debug("Fan-in goroutine started")
 		defer faninWg.Done()
 		for res := range outCh {
 			results[res.idx] = res.text
 		}
+		s.logger.Debug("Fan-in goroutine finished")
 	}()
 
-	// Workers
 	var workerWg sync.WaitGroup
 	for i := 0; i < numOfGorutines; i++ {
+		workerID := i
 		workerWg.Add(1)
-		go func() {
-			defer workerWg.Done()
-			for t := range inCh {
-				semaphore.Acquire()
-				masked := s.mask(t.text)
-				outCh <- result{t.idx, masked}
-				semaphore.Release()
+		go func(id int) {
+			logger := s.logger.With(slog.Int("worker", id))
+			logger.Debug("Worker started")
+			defer func() {
+				logger.Debug("Worker finished")
+				workerWg.Done()
+			}()
+			for {
+				select {
+				case <-ctx.Done():
+					logger.Warn("Worker canceled by context")
+					return
+				case t, ok := <-inCh:
+					if !ok {
+						logger.Debug("Input channel closed")
+						return
+					}
+					semaphore.Acquire()
+					logger.Debug("Processing task", slog.Int("task_idx", t.idx))
+					masked := s.mask(t.text)
+					outCh <- result{t.idx, masked}
+					semaphore.Release()
+				}
 			}
-		}()
+		}(workerID)
 	}
 
-	// Producer: send tasks
 	go func() {
+		s.logger.Debug("Producer goroutine started")
 		for idx, line := range data {
-			inCh <- task{idx, line}
+			select {
+			case <-ctx.Done():
+				s.logger.Warn("Producer canceled by context")
+				close(inCh)
+				return
+			default:
+				inCh <- task{idx, line}
+			}
 		}
 		close(inCh)
+		s.logger.Debug("Producer goroutine finished")
 	}()
 
 	workerWg.Wait()
 	close(outCh)
 	faninWg.Wait()
 
+	if ctx.Err() != nil {
+		s.logger.Warn("Context canceled or timed out", slog.String("err", ctx.Err().Error()))
+		return fmt.Errorf("context canceled or timed out: %w", ctx.Err())
+	}
+
 	if err := s.pres.Present(results); err != nil {
+		s.logger.Error("Presenter error", slog.String("error", err.Error()))
 		return fmt.Errorf("presenter error: %w", err)
 	}
+	s.logger.Info("Service finished (semaphore mode)")
 	return nil
 }
 
-func (s *Service) RunWithWorkerPool() error {
+func (s *Service) RunWithWorkerPool(ctx context.Context) error {
+	s.logger.Debug("Service started (workerpool mode)")
+
 	data, err := s.prod.Produce()
 	if err != nil {
+		s.logger.Error("Producer error", slog.String("error", err.Error()))
 		return fmt.Errorf("producer error: %w", err)
 	}
 
@@ -139,49 +180,83 @@ func (s *Service) RunWithWorkerPool() error {
 	pool := utils.NewWorkerPool(numOfGorutines)
 	pool.Run()
 
-	// Fan-in
 	results := make([]string, len(data))
 	var faninWg sync.WaitGroup
 	faninWg.Add(1)
 	go func() {
+		s.logger.Debug("Fan-in goroutine started")
 		defer faninWg.Done()
 		for res := range outCh {
 			results[res.idx] = res.text
 		}
+		s.logger.Debug("Fan-in goroutine finished")
 	}()
 
-	// Workers
 	var workerWg sync.WaitGroup
 	for i := 0; i < numOfGorutines; i++ {
+		workerID := i
 		workerWg.Add(1)
-		pool.AddTask(func() {
-			defer workerWg.Done()
-			for t := range inCh {
-				masked := s.mask(t.text)
-				outCh <- result{t.idx, masked}
+		pool.AddTask(func(id int) func() {
+			return func() {
+				logger := s.logger.With(slog.Int("worker", id))
+				logger.Debug("Worker started")
+				defer func() {
+					logger.Debug("Worker finished")
+					workerWg.Done()
+				}()
+				for {
+					select {
+					case <-ctx.Done():
+						logger.Warn("Worker canceled by context")
+						return
+					case t, ok := <-inCh:
+						if !ok {
+							logger.Debug("Input channel closed")
+							return
+						}
+						logger.Debug("Processing task", slog.Int("task_idx", t.idx))
+						masked := s.mask(t.text)
+						outCh <- result{t.idx, masked}
+					}
+				}
 			}
-		})
+		}(workerID))
 	}
 
-	// Producer: sent tasks
 	go func() {
+		s.logger.Debug("Producer goroutine started")
 		for idx, line := range data {
-			inCh <- task{idx, line}
+			select {
+			case <-ctx.Done():
+				s.logger.Warn("Producer canceled by context")
+				close(inCh)
+				return
+			default:
+				inCh <- task{idx, line}
+			}
 		}
 		close(inCh)
+		s.logger.Debug("Producer goroutine finished")
 	}()
 
 	workerWg.Wait()
 	close(outCh)
 	faninWg.Wait()
 
+	if ctx.Err() != nil {
+		s.logger.Warn("Context canceled or timed out", slog.String("err", ctx.Err().Error()))
+		return fmt.Errorf("context canceled or timed out: %w", ctx.Err())
+	}
+
 	if err := s.pres.Present(results); err != nil {
+		s.logger.Error("Presenter error", slog.String("error", err.Error()))
 		return fmt.Errorf("presenter error: %w", err)
 	}
+	s.logger.Info("Service finished (workerpool mode)")
 	return nil
 }
 
-func (s *Service) Run() error {
-	return s.RunWithSemaphore()
+func (s *Service) Run(ctx context.Context) error {
+	return s.RunWithSemaphore(ctx)
 	// return s.RunWithWorkerPool()
 }
